@@ -8,6 +8,8 @@ case class Stop();
 case class Ready();
 case class Go();
 case class Change(in: BitSet);
+case class IncWork();
+case class DecWork();
 
 class Random(seed: Int) {
         var w = seed + 1;
@@ -22,9 +24,10 @@ class Random(seed: Int) {
         }
 }
 
-class Controller(val cfg: Array[Vertex]) extends Actor {
+class Controller(val cfg: Array[Vertex], val print: Int) extends Actor {
   var started = 0;
   val begin   = System.currentTimeMillis();
+  var working = 0;
 
   // LAB 2: The controller must figure out when
   //        to terminate all actors somehow.
@@ -39,6 +42,25 @@ class Controller(val cfg: Array[Vertex]) extends Actor {
             u ! new Go;
         }
         act();
+      }
+
+      case IncWork() => {
+        working += 1;
+        act();
+      }
+
+      case DecWork() => {
+        working -= 1;
+        if(working == 0) {
+          cfg.foreach(u => u ! new Stop)
+          val end = System.currentTimeMillis();
+          System.out.println("T = " + (end - begin)/1e3 + " s");
+          if (print != 0) {
+            cfg.foreach(u => u.print);
+          }
+        } else {
+          act();
+        }
       }
     }
   }
@@ -69,10 +91,34 @@ class Vertex(val index: Int, s: Int, val controller: Controller) extends Actor {
 
       case Go() => {
         // LAB 2: Start working with this vertex.
+        controller ! new IncWork;
+        computeIn(new BitSet(s));
+        controller ! new DecWork;
+        act();
+      }
+
+      case Change(in: BitSet) => {
+        controller ! new IncWork;
+        computeIn(in);
+        controller ! new DecWork;
         act();
       }
 
       case Stop()  => { }
+    }
+  }
+
+  def computeIn(in: BitSet) {
+    out.or(in);
+
+    val old = this.in;
+    this.in = new BitSet(s);
+    this.in.or(out);
+    this.in.andNot(defs);
+    this.in.or(uses);
+
+    if(!this.in.equals(old)){
+      pred.foreach(v => v ! new Change(this.in));
     }
   }
 
@@ -137,7 +183,7 @@ object Driver {
     nactive        = args(3).toInt;
     val print      = args(4).toInt;
     val cfg        = new Array[Vertex](nvertex);
-    val controller = new Controller(cfg);
+    val controller = new Controller(cfg, print);
 
     controller.start;
 
@@ -157,8 +203,5 @@ object Driver {
     for (i <- 0 until nvertex)
       cfg(i) ! new Start;
 
-    if (print != 0)
-      for (i <- 0 until nvertex)
-        cfg(i).print;
   }
 }
